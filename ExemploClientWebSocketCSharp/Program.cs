@@ -14,39 +14,30 @@ namespace ExemploClientWebSocketCSharp
 
 			try
 			{
+				Console.WriteLine("Escolha uma opção para conectar:");
+				Console.WriteLine("  (1) - wss://echo.websocket.org");
+				Console.WriteLine("  (2) - wss://exemplowebsocketcsharp.azurewebsites.net/ws");
+
+				var url = (Console.ReadKey().KeyChar) switch
+				{
+					'1' => "wss://echo.websocket.org",
+					'2' => "wss://exemplowebsocketcsharp.azurewebsites.net/ws",
+					_ => throw new Exception("Opção inválida!"),
+				};
+
+				Console.WriteLine();
+
 				using var cts = new CancellationTokenSource();
 				using var clientWS = new ClientWebSocket();
-				var wsUri = new Uri("wss://echo.websocket.org");
-				
-				await clientWS.ConnectAsync(wsUri, cts.Token);
 
-				while (clientWS.State == WebSocketState.Open)
-				{
-					Console.Write("Digite uma mensagem para enviar: ");
-					var mensagem = Console.ReadLine();
+				Console.WriteLine("Conectando...");
+				await clientWS.ConnectAsync(new Uri(url), cts.Token);
 
-					if (string.IsNullOrWhiteSpace(mensagem))
-					{
-						cts.Cancel();
-						break;
-					}
+				var receiveCallbackTask = StartReceiveCallback(clientWS, cts.Token);
+				var sendCallbackTask = StartSendCallback(clientWS, cts.Token);
 
-					var sendData = new ArraySegment<byte>(Encoding.UTF8.GetBytes(mensagem));
-					await clientWS.SendAsync(sendData, WebSocketMessageType.Text, true, cts.Token);
-
-					var responseBuffer = new byte[4096];
-
-					while (true)
-					{
-						var response = await clientWS.ReceiveAsync(new ArraySegment<byte>(responseBuffer), cts.Token);
-
-						if (response.EndOfMessage)
-							break;
-					}
-
-					var responseText = Encoding.UTF8.GetString(responseBuffer);
-					Console.WriteLine($"Resposta: {responseText}");
-				}
+				await Task.WhenAny(receiveCallbackTask, sendCallbackTask);
+				cts.Cancel();
 
 				Console.WriteLine("Fim do programa.");
 			}
@@ -55,5 +46,40 @@ namespace ExemploClientWebSocketCSharp
 				Console.WriteLine($"Erro: {ex.Message}");
 			}
 		}
+
+
+		static async Task StartSendCallback(ClientWebSocket clientWS, CancellationToken cancellationToken)
+		{
+			Console.WriteLine("Digite algo para enviar... (ou ENTER para sair)");
+
+			while (clientWS.State == WebSocketState.Open)
+			{
+				var mensagem = Console.ReadLine();
+
+				if (string.IsNullOrWhiteSpace(mensagem))
+					break;
+
+				var sendData = new ArraySegment<byte>(Encoding.UTF8.GetBytes(mensagem));
+				await clientWS.SendAsync(sendData, WebSocketMessageType.Text, true, cancellationToken);
+			}
+		}
+
+		static async Task StartReceiveCallback(ClientWebSocket clientWS, CancellationToken cancellationToken)
+		{
+			var buffer = new byte[4096];
+
+			while (!cancellationToken.IsCancellationRequested)
+			{
+				var result = await clientWS.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+
+				if (result.CloseStatus.HasValue)
+					break;
+
+				var mensagemRecebida = Encoding.UTF8.GetString(buffer, 0, result.Count);
+				Console.WriteLine($"Recebida: {mensagemRecebida}");
+			}
+		}
+
 	}
+
 }
